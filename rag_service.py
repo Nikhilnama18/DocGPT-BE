@@ -1,5 +1,7 @@
 import os
-from langchain_community.document_loaders import PyPDFLoader, TextLoader
+import tempfile
+
+from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_qdrant import QdrantVectorStore
@@ -9,6 +11,8 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
 from dotenv import load_dotenv
+
+from document_repository import update_document_status
 
 # Load environment variables from .env file
 load_dotenv()
@@ -60,47 +64,105 @@ def ensure_payload_index():
         # Index may already exist, which is fine
         print(f"Payload index check: {e}")
 
-def process_document(file_path: str, document_id: str):
+
+def load_document(file_path: str, document_id: str):
     """
-    Loads a PDF or TXT document, splits it into chunks, and stores it in Qdrant Cloud.
-    Adds a 'document_id' metadata to differentiate between different documents.
+    Loads a supported document and adds the document_id to metadata.
     """
-    print(f"Processing document: {file_path} with id: {document_id}")
-    
-    # 1. Load the document based on extension
+    print(f"Loading document: {file_path} with id: {document_id}")
+
     if file_path.lower().endswith('.pdf'):
         loader = PyPDFLoader(file_path)
+    elif file_path.lower().endswith('.docx'):
+        loader = Docx2txtLoader(file_path)
     elif file_path.lower().endswith('.txt'):
         loader = TextLoader(file_path)
     else:
-        raise ValueError("Unsupported file type. Only PDF and TXT are supported.")
-        
+        raise ValueError("Unsupported file type. Only PDF, DOCX, and TXT are supported.")
+
     docs = loader.load()
-    
-    # Add document_id to metadata
+
     for doc in docs:
         doc.metadata["document_id"] = document_id
-    
-    # 2. Split the document into smaller chunks
+
+    return docs
+
+
+def split_document(docs):
+    """
+    Splits loaded documents into smaller chunks.
+    """
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000, 
+        chunk_size=1000,
         chunk_overlap=200
     )
-    splits = text_splitter.split_documents(docs)
-    
-    # 3. Store the chunks in the Vector Database (Qdrant)
+    return text_splitter.split_documents(docs)
+
+
+def index_document(splits):
+    """
+    Stores document chunks in Qdrant.
+    """
     vectorstore = QdrantVectorStore.from_documents(
-        documents=splits, 
-        embedding=embeddings, 
+        documents=splits,
+        embedding=embeddings,
         url=QDRANT_URL,
         api_key=QDRANT_API_KEY,
         collection_name=COLLECTION_NAME
     )
-    
-    # 4. Ensure payload index exists for filtered queries
     ensure_payload_index()
-    
     return vectorstore
+
+
+def process_document(file_path: str, document_id: str):
+    """
+    Loads a document, splits it into chunks, and stores it in Qdrant Cloud.
+    """
+    print(f"Processing document: {file_path} with id: {document_id}")
+    docs = load_document(file_path, document_id)
+    splits = split_document(docs)
+    return index_document(splits)
+
+
+def process_uploaded_document_task(document_id: str, file_name: str, file_bytes: bytes):
+    """
+    Background task that processes an uploaded document and updates database status
+    through parsing, chunking, embedding, indexing, and ready states.
+    """
+    temp_file_path = None
+    try:
+        suffix = os.path.splitext(file_name)[1].lower()
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            temp_file.write(file_bytes)
+            temp_file_path = temp_file.name
+
+        update_document_status(document_id, "PARSING")
+        docs = load_document(temp_file_path, document_id)
+
+        update_document_status(document_id, "CHUNKING")
+        splits = split_document(docs)
+        chunk_count = len(splits)
+
+        update_document_status(document_id, "EMBEDDING")
+        vectorstore = QdrantVectorStore.from_documents(
+            documents=splits,
+            embedding=embeddings,
+            url=QDRANT_URL,
+            api_key=QDRANT_API_KEY,
+            collection_name=COLLECTION_NAME,
+        )
+
+        update_document_status(document_id, "INDEXING", chunk_count=chunk_count)
+        ensure_payload_index()
+
+        update_document_status(document_id, "READY", chunk_count=chunk_count)
+        return vectorstore
+    except Exception as exc:
+        update_document_status(document_id, "FAILED", error_message=str(exc))
+        raise
+    finally:
+        if temp_file_path and os.path.exists(temp_file_path):
+            os.unlink(temp_file_path)
 
 def init_default_document():
     """
