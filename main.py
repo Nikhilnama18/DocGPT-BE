@@ -3,6 +3,7 @@ from fastapi import BackgroundTasks, FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from cleanup_service import start_cleanup_scheduler
 from document_repository import get_document_by_id
 
 # Import functions from our newly created rag_service
@@ -19,11 +20,17 @@ from upload_service import create_uploaded_document
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # This block runs when the application starts
+    scheduler = None
     print("Starting up... Initializing default document if necessary.")
     init_default_document()
-    yield
-    # This block runs when the application shuts down
-    print("Shutting down...")
+    scheduler = start_cleanup_scheduler()
+    try:
+        yield
+    finally:
+        # This block runs when the application shuts down
+        if scheduler:
+            scheduler.shutdown(wait=False)
+        print("Shutting down...")
 
 app = FastAPI(
     title="DocGPT API",

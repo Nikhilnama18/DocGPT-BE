@@ -124,6 +124,34 @@ def process_document(file_path: str, document_id: str):
     return index_document(splits)
 
 
+def delete_document_embeddings(document_id: str) -> None:
+    """
+    Deletes all Qdrant points associated with a document_id.
+    """
+    try:
+        qdrant_client.get_collection(COLLECTION_NAME)
+    except Exception:
+        print(
+            f"Qdrant collection '{COLLECTION_NAME}' not found. "
+            f"Skipping embedding cleanup for document {document_id}."
+        )
+        return
+
+    qdrant_filter = rest.Filter(
+        must=[
+            rest.FieldCondition(
+                key="metadata.document_id",
+                match=rest.MatchValue(value=document_id),
+            )
+        ]
+    )
+    qdrant_client.delete(
+        collection_name=COLLECTION_NAME,
+        points_selector=rest.FilterSelector(filter=qdrant_filter),
+        wait=True,
+    )
+
+
 def process_uploaded_document_task(document_id: str, file_name: str, file_bytes: bytes):
     """
     Background task that processes an uploaded document and updates database status

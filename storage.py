@@ -1,4 +1,5 @@
 import os
+from urllib.parse import urlparse
 
 import boto3
 from botocore.config import Config
@@ -67,3 +68,19 @@ def upload_bytes_to_r2(object_key: str, content: bytes, mime_type: str) -> str:
 def delete_from_r2(object_key: str) -> None:
     client = get_r2_client()
     client.delete_object(Bucket=get_r2_bucket_name(), Key=object_key)
+
+
+def get_object_key_from_storage_url(storage_url: str) -> str:
+    public_base_url = os.getenv("R2_PUBLIC_BASE_URL")
+    if public_base_url:
+        normalized_base_url = public_base_url.rstrip("/")
+        if storage_url.startswith(f"{normalized_base_url}/"):
+            object_key = storage_url.removeprefix(f"{normalized_base_url}/")
+            if object_key:
+                return object_key
+
+    parsed_url = urlparse(storage_url)
+    object_key = parsed_url.path.lstrip("/")
+    if not object_key:
+        raise ValueError(f"Unable to derive R2 object key from storage URL: {storage_url}")
+    return object_key
