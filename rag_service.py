@@ -15,8 +15,8 @@ load_dotenv()
 
 # We use OpenRouter via the OpenAI SDK in LangChain, as OpenRouter is OpenAI-compatible.
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
-QDRANT_API_KEY = os.getenv("Qdrant_API_KEY")
-QDRANT_URL = os.getenv("Qdrant_CLUSTER_URL")
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+QDRANT_URL = os.getenv("QDRANT_CLUSTER_URL")
 
 COLLECTION_NAME = "docgpt_collection"
 
