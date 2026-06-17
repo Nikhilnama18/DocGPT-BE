@@ -1,10 +1,19 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import BackgroundTasks, FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from document_repository import get_document_by_id
+
 # Import functions from our newly created rag_service
-from rag_service import standard_rag, multi_query_rag, step_back_rag, hyde_rag, init_default_document
+from rag_service import (
+    standard_rag,
+    multi_query_rag,
+    step_back_rag,
+    hyde_rag,
+    init_default_document,
+    process_uploaded_document_task,
+)
 from upload_service import create_uploaded_document
 
 @asynccontextmanager
@@ -41,13 +50,40 @@ async def health_check():
     return {"status": "ok", "message": "DocGPT Backend is running!"}
 
 @app.post("/api/upload", status_code=202)
-async def upload_file(file: UploadFile = File(...)):
+async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """
     Endpoint to upload a document, store it in Cloudflare R2,
     persist metadata in Neon Postgres, and queue it for background processing.
     """
     try:
-        return await create_uploaded_document(file)
+        response_payload, task_payload = await create_uploaded_document(file)
+        background_tasks.add_task(process_uploaded_document_task, **task_payload)
+        return response_payload
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/document/{document_id}/status")
+async def get_document_status(document_id: str):
+    """
+    Returns the current processing status for an uploaded document.
+    """
+    try:
+        document = get_document_by_id(document_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        return {
+            "document_id": str(document["id"]),
+            "status": document["status"],
+            "chunk_count": document["chunk_count"],
+            "error_message": document["error_message"],
+            "created_at": document["created_at"],
+            "updated_at": document["updated_at"],
+            "expires_at": document["expires_at"],
+        }
     except HTTPException:
         raise
     except Exception as e:
@@ -76,5 +112,7 @@ async def query_document(request: QueryRequest):
             raise HTTPException(status_code=400, detail=f"Strategy '{strategy}' not implemented yet. Supported: standard, multi_query, step_back, hyde")
             
         return {"question": question, "strategy": strategy, "document_id": document_id, "answer": answer}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

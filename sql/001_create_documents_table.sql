@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     expires_at TIMESTAMPTZ NOT NULL,
-    error_message TEXT,
+    error_message TEXT DEFAULT NULL,
     CONSTRAINT documents_chunk_count_non_negative CHECK (
         chunk_count IS NULL OR chunk_count >= 0
     ),
