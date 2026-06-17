@@ -9,7 +9,7 @@ The product goal is to support two document flows:
 - a default document flow seeded by the backend at startup
 - a user-uploaded document flow processed asynchronously
 
-Across both flows, the user should be able to ask questions against a selected `doc_id` using a selectable query strategy.
+Across both flows, the user should be able to ask questions against a selected `document_id` using a selectable query strategy.
 
 The current repository already exposes a small FastAPI server that:
 
@@ -32,8 +32,8 @@ This is the intended backend direction based on the current project plan.
 - use a small source document, ideally under 50 pages
 - process it when the server starts
 - parsing -> chunking -> embeddings -> Qdrant storage
-- store it under a stable `doc_id`, likely `"default"` or a fixed local identifier
-- before ingesting, check whether that default `doc_id` already exists in Qdrant to avoid duplicate processing
+- store it under a stable `document_id`, likely `"default"` for the seed document
+- before ingesting, check whether that default `document_id` already exists in Qdrant to avoid duplicate processing
 
 ### Flow 2: user-uploaded document
 
@@ -42,9 +42,10 @@ This is the intended backend direction based on the current project plan.
 - raw file should be saved in blob storage
 - upload metadata and processing state should be stored in Neon Postgres
 - ingestion should run asynchronously
-- API returns a `doc_id` immediately
-- client can poll document processing status using that `doc_id`
-- after processing completes, client can query by sending `question`, `strategy`, and `doc_id`
+- API returns the document `id` immediately
+- client can poll document processing status using that `id`
+- after processing completes, client can query by sending `question`, `strategy`, and `document_id`
+- for this demo, one `documents` table is enough; a second queue table is not required
 
 ### Query strategy goal
 
@@ -67,7 +68,7 @@ So the implementation can evolve by aligning naming and UX with the intended pro
 
 Planned cleanup behavior:
 
-- a recurring job runs every 24 hours
+- a periodic cleanup job can run every few days in the demo setup
 - it finds uploaded documents older than 12 hours using Neon metadata such as `created_at`
 - it deletes expired source files from blob storage
 - it deletes associated embeddings from Qdrant
@@ -78,12 +79,12 @@ This keeps storage and vector usage bounded as uploads grow.
 
 1. FastAPI starts and runs the lifespan hook in `main.py`.
 2. Startup calls `init_default_document()` from `rag_service.py`.
-3. If the Qdrant collection is missing or empty, the app ingests `The Yellow Wallpaper.txt` with `doc_id="default"`.
+3. If the Qdrant collection is missing or empty, the app ingests `The Yellow Wallpaper.txt` with `document_id="default"`.
 4. Clients can upload a `.pdf` or `.txt` to `/api/upload`.
 5. The upload endpoint saves the file into `data/` using a generated UUID prefix, then calls `process_document(...)`.
-6. `process_document(...)` loads the file, adds `metadata["doc_id"]`, splits it into chunks, embeds the chunks, and writes them into Qdrant.
-7. Clients call `/api/query` with `question`, `strategy`, and `doc_id`.
-8. The backend creates a Qdrant retriever filtered on `metadata.doc_id` and runs one of the RAG strategies.
+6. `process_document(...)` loads the file, adds `metadata["document_id"]`, splits it into chunks, embeds the chunks, and writes them into Qdrant.
+7. Clients call `/api/query` with `question`, `strategy`, and `document_id`.
+8. The backend creates a Qdrant retriever filtered on `metadata.document_id` and runs one of the RAG strategies.
 
 ### Storage and external services
 
@@ -109,12 +110,13 @@ What is not implemented yet:
 - blob storage for user uploads
 - Neon Postgres table for document metadata and processing status
 - asynchronous background ingestion for uploads
-- upload status endpoint by `doc_id`
+- upload status endpoint by `id`
 - cleanup job for expired documents
 - deletion of expired vectors from Qdrant
 - strict `< 1 MB` upload limit
 - native `.doc` support
-- explicit check that `doc_id="default"` exists before skipping default ingestion
+- explicit check that `document_id="default"` exists before skipping default ingestion
+- a separate queue table is intentionally not needed for the demo
 
 ## Environment variables
 
@@ -137,8 +139,8 @@ Returns a simple status payload.
 
 - Accepts one multipart file field named `file`
 - Only allows `.pdf` and `.txt` in the current code
-- Generates a UUID `doc_id`
-- Saves the file to `data/{doc_id}_{original_filename}`
+- Generates a UUID `id`
+- Stores the file in R2 under a key derived from that UUID
 - Processes and indexes the file in Qdrant
 
 Planned evolution:
@@ -151,7 +153,7 @@ Planned evolution:
 Response includes:
 
 - `message`
-- `doc_id`
+- `id`
 
 ### `POST /api/query`
 
@@ -161,7 +163,7 @@ Request body:
 {
   "question": "string",
   "strategy": "standard",
-  "doc_id": "default"
+  "document_id": "default"
 }
 ```
 
@@ -213,14 +215,14 @@ Supported strategies:
 - There is no automated test suite in the repo right now.
 - Error handling in `main.py` wraps broad exceptions into HTTP 500 responses.
 - The upload success message says "into Qdrant", which matches current code, but the repo still contains an unused `chroma_db/` folder that may confuse contributors.
-- `init_default_document()` only checks whether the collection has any points, not whether `doc_id="default"` specifically exists, which does not yet match the intended architecture.
+- `init_default_document()` only checks whether the collection has any points, not whether `document_id="default"` specifically exists, which does not yet match the intended architecture.
 - Uploaded files are saved locally and are not cleaned up after ingestion.
 - `langchain-huggingface` and `sentence-transformers` appear in `requirements.txt` but are not used by the current implementation.
 - The current backend accepts `.txt`, while the future product description focuses on `.doc` and `.pdf`, so file format support needs a deliberate decision.
 
 ## Safe change guidelines for future agents
 
-- Preserve the `doc_id` metadata path unless you also update the Qdrant payload index and filter key.
+- Preserve the `document_id` metadata path unless you also update the Qdrant payload index and filter key.
 - If you add a new RAG strategy, update both `rag_service.py` and the dispatch logic in `main.py`.
 - Keep startup behavior in mind before changing collection initialization; the app currently assumes it can auto-seed content at boot.
 - Do not expose `.env` values in logs, docs, or commits.

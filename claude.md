@@ -7,8 +7,8 @@ This repo is the backend slice of DocGPT, a project to demonstrate RAG and query
 Target product shape:
 
 - one default document ingested on server startup
-- one user-upload flow that returns a `doc_id` and processes asynchronously
-- querying by `question + strategy + doc_id`
+- one user-upload flow that returns a document `id` and processes asynchronously
+- querying by `question + strategy + document_id`
 - short-lived uploaded documents cleaned up automatically later
 
 Current implementation shape:
@@ -23,8 +23,8 @@ If you need to understand behavior, read those two Python files first.
 
 ## Most important invariants
 
-- Every indexed chunk must carry `metadata["doc_id"]`
-- Every query must retrieve with the Qdrant filter on `metadata.doc_id`
+- Every indexed chunk must carry `metadata["document_id"]`
+- Every query must retrieve with the Qdrant filter on `metadata.document_id`
 - Startup may ingest `The Yellow Wallpaper.txt` as the default corpus
 - Supported user-visible strategies are only `standard`, `multi_query`, `step_back`, and `hyde`
 
@@ -36,6 +36,7 @@ Breaking any of those changes user behavior immediately.
 - The uploaded document flow should eventually be async and status-driven.
 - Uploads are intended to be temporary, with later cleanup from blob storage and Qdrant.
 - Neon Postgres is intended to become the source of truth for upload metadata, lifecycle, and expiry.
+- For the demo scope, keep this in one `documents` table unless a second table becomes truly necessary.
 
 ## How the backend works
 
@@ -47,21 +48,21 @@ That function:
 
 - checks whether the Qdrant collection exists,
 - ingests `The Yellow Wallpaper.txt` if the collection is missing or empty,
-- otherwise ensures a payload index exists on `metadata.doc_id`.
+- otherwise ensures a payload index exists on `metadata.document_id`.
 
 ### Uploads
 
 `POST /api/upload`:
 
 - currently accepts `.pdf` and `.txt` only
-- creates a UUID `doc_id`
-- writes the uploaded file into `data/`
-- calls `process_document(file_path, doc_id)`
+- creates a UUID `id`
+- uploads the raw file to R2
+- stores metadata in Postgres with `status = UPLOADED`
 
 `process_document(...)`:
 
 - uses `PyPDFLoader` or `TextLoader`
-- attaches `doc_id` to each loaded document
+- attaches `document_id` to each loaded document
 - splits text with `RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)`
 - writes embeddings into the `docgpt_collection` Qdrant collection
 
@@ -69,16 +70,16 @@ That function:
 
 `POST /api/query`:
 
-- reads `question`, `strategy`, and `doc_id`
+- reads `question`, `strategy`, and `document_id`
 - dispatches to one RAG function
 - returns the final answer string
 
-The shared retriever is built in `get_retriever(doc_id)` and uses:
+The shared retriever is built in `get_retriever(document_id)` and uses:
 
 - `QdrantVectorStore`
 - `k=3`
 - `rest.Filter`
-- `key="metadata.doc_id"`
+- `key="metadata.document_id"`
 
 ## Environment assumptions
 
@@ -93,11 +94,11 @@ Watch the casing. The code does not use uppercase Qdrant variable names.
 ## Planned architecture that is not built yet
 
 - blob storage for uploaded source files
-- Neon Postgres table keyed by `doc_id`
+- Neon Postgres table keyed by `id`
 - async ingestion job for uploads
 - status endpoint for polling ingestion progress
 - upload validation for `< 1 MB`
-- expiry cleanup job running every 24 hours
+- expiry cleanup job running periodically, potentially every few days in the demo
 - deletion of expired blobs and their Qdrant vectors
 - likely support for `.doc` in addition to `.pdf`
 
@@ -111,7 +112,7 @@ Watch the casing. The code does not use uppercase Qdrant variable names.
 ## If you are asked to modify this project
 
 - For new query strategies: add a function in `rag_service.py`, then wire it into `main.py`
-- For retrieval bugs: check env vars, Qdrant connectivity, collection existence, payload index, and `doc_id` filter logic
+- For retrieval bugs: check env vars, Qdrant connectivity, collection existence, payload index, and `document_id` filter logic
 - For upload bugs: check file extension validation, write permissions to `data/`, and loader selection
 - For answer quality issues: inspect the prompt template, chunking settings, and retriever `k`
 - For roadmap work: keep the product split clear between "default seeded doc" and "async uploaded doc"
