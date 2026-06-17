@@ -1,10 +1,11 @@
 from contextlib import asynccontextmanager
-from fastapi import BackgroundTasks, FastAPI, UploadFile, File, HTTPException
+from fastapi import BackgroundTasks, FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from cleanup_service import start_cleanup_scheduler
 from document_repository import get_document_by_id
+from rate_limit import enforce_upload_rate_limit
 
 # Import functions from our newly created rag_service
 from rag_service import (
@@ -57,12 +58,17 @@ async def health_check():
     return {"status": "ok", "message": "DocGPT Backend is running!"}
 
 @app.post("/api/upload", status_code=202)
-async def upload_file(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+async def upload_file(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+):
     """
     Endpoint to upload a document, store it in Cloudflare R2,
     persist metadata in Neon Postgres, and queue it for background processing.
     """
     try:
+        enforce_upload_rate_limit(request)
         response_payload, task_payload = await create_uploaded_document(file)
         background_tasks.add_task(process_uploaded_document_task, **task_payload)
         return response_payload
