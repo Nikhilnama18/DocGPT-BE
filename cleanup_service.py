@@ -5,7 +5,7 @@ from rag_service import delete_document_embeddings
 from storage import delete_from_r2, get_object_key_from_storage_url
 
 CLEANUP_BATCH_SIZE = 200
-CLEANUP_INTERVAL_HOURS = 12
+CLEANUP_INTERVAL_HOURS = 3
 
 
 def cleanup_expired_and_failed_documents() -> dict:
