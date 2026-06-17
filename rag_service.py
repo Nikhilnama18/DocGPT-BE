@@ -45,27 +45,27 @@ qdrant_client = QdrantClient(
 
 def ensure_payload_index():
     """
-    Ensures that a keyword index exists on 'metadata.doc_id' in the Qdrant collection.
+    Ensures that a keyword index exists on 'metadata.document_id' in the Qdrant collection.
     Qdrant Cloud requires explicit payload indexes for filtered searches to work.
     This is idempotent — if the index already exists, Qdrant will simply ignore the call.
     """
     try:
         qdrant_client.create_payload_index(
             collection_name=COLLECTION_NAME,
-            field_name="metadata.doc_id",
+            field_name="metadata.document_id",
             field_schema=rest.PayloadSchemaType.KEYWORD,
         )
-        print("Payload index on 'metadata.doc_id' ensured.")
+        print("Payload index on 'metadata.document_id' ensured.")
     except Exception as e:
         # Index may already exist, which is fine
         print(f"Payload index check: {e}")
 
-def process_document(file_path: str, doc_id: str):
+def process_document(file_path: str, document_id: str):
     """
     Loads a PDF or TXT document, splits it into chunks, and stores it in Qdrant Cloud.
-    Adds a 'doc_id' metadata to differentiate between different documents.
+    Adds a 'document_id' metadata to differentiate between different documents.
     """
-    print(f"Processing document: {file_path} with id: {doc_id}")
+    print(f"Processing document: {file_path} with id: {document_id}")
     
     # 1. Load the document based on extension
     if file_path.lower().endswith('.pdf'):
@@ -77,9 +77,9 @@ def process_document(file_path: str, doc_id: str):
         
     docs = loader.load()
     
-    # Add doc_id to metadata
+    # Add document_id to metadata
     for doc in docs:
-        doc.metadata["doc_id"] = doc_id
+        doc.metadata["document_id"] = document_id
     
     # 2. Split the document into smaller chunks
     text_splitter = RecursiveCharacterTextSplitter(
@@ -112,7 +112,7 @@ def init_default_document():
             collection_info = qdrant_client.get_collection(COLLECTION_NAME)
             if collection_info.points_count == 0:
                 print("Qdrant collection is empty. Ingesting default document...")
-                process_document(default_doc_path, doc_id="default")
+                process_document(default_doc_path, document_id="default")
             else:
                 print("Qdrant collection already contains documents. Skipping default ingestion.")
                 # Ensure the index exists even if we skip ingestion
@@ -120,13 +120,13 @@ def init_default_document():
         except Exception:
             # If get_collection throws an exception, the collection probably doesn't exist yet
             print("Qdrant collection not found. Ingesting default document...")
-            process_document(default_doc_path, doc_id="default")
+            process_document(default_doc_path, document_id="default")
     else:
         print(f"Default document '{default_doc_path}' not found. Skipping.")
 
-def get_retriever(doc_id: str):
+def get_retriever(document_id: str):
     """
-    Returns a retriever object to query Qdrant, filtered by doc_id.
+    Returns a retriever object to query Qdrant, filtered by document_id.
     """
     vectorstore = QdrantVectorStore(
         client=qdrant_client,
@@ -138,8 +138,8 @@ def get_retriever(doc_id: str):
     qdrant_filter = rest.Filter(
         must=[
             rest.FieldCondition(
-                key="metadata.doc_id",
-                match=rest.MatchValue(value=doc_id),
+                key="metadata.document_id",
+                match=rest.MatchValue(value=document_id),
             )
         ]
     )
@@ -149,13 +149,13 @@ def get_retriever(doc_id: str):
 
 # --- RAG Strategies ---
 
-def standard_rag(question: str, doc_id: str):
+def standard_rag(question: str, document_id: str):
     """
     A standard Retrieval-Augmented Generation query.
     1. Retrieve relevant documents from the database based on the question.
     2. Pass the documents and the question to the LLM to get an answer.
     """
-    retriever = get_retriever(doc_id)
+    retriever = get_retriever(document_id)
     
     # Define a prompt template telling the LLM how to behave
     template = """Use the following pieces of retrieved context to answer the question. 
@@ -184,14 +184,14 @@ def standard_rag(question: str, doc_id: str):
     
 # --- Advanced Query Translation Strategies ---
 
-def multi_query_rag(question: str, doc_id: str):
+def multi_query_rag(question: str, document_id: str):
     """
     Multi-Query Strategy:
     Asks the LLM to generate 3 variations of the original question.
     It retrieves documents for all variations to get a broader context,
     then answers the original question.
     """
-    retriever = get_retriever(doc_id)
+    retriever = get_retriever(document_id)
     
     # 1. Generate multiple queries
     multi_query_prompt = PromptTemplate(
@@ -241,13 +241,13 @@ def multi_query_rag(question: str, doc_id: str):
     answer_chain = answer_prompt | llm | StrOutputParser()
     return answer_chain.invoke({"context": context, "question": question})
 
-def step_back_rag(question: str, doc_id: str):
+def step_back_rag(question: str, document_id: str):
     """
     Step-Back Strategy:
     Generates a more abstract, higher-level question. Retrieves documents for 
     both the original and step-back questions to get broader background context.
     """
-    retriever = get_retriever(doc_id)
+    retriever = get_retriever(document_id)
     
     # 1. Generate step-back question
     step_back_prompt = PromptTemplate.from_template(
@@ -284,14 +284,14 @@ def step_back_rag(question: str, doc_id: str):
     answer_chain = answer_prompt | llm | StrOutputParser()
     return answer_chain.invoke({"context": context, "question": question})
 
-def hyde_rag(question: str, doc_id: str):
+def hyde_rag(question: str, document_id: str):
     """
     HyDE (Hypothetical Document Embeddings) Strategy:
     Generates a hypothetical (fake) answer to the question. 
     Uses this hypothetical answer to search the vector database for real documents,
     because the fake answer shares similar vocabulary with the real answer.
     """
-    retriever = get_retriever(doc_id)
+    retriever = get_retriever(document_id)
     
     # 1. Generate a hypothetical answer
     hyde_prompt = PromptTemplate.from_template(
