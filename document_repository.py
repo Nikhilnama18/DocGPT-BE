@@ -1,7 +1,14 @@
 from datetime import datetime
 from uuid import UUID
-
 from db import get_db_connection
+
+
+def is_valid_uuid(value: str) -> bool:
+    try:
+        UUID(value)
+        return True
+    except ValueError:
+        return False
 
 
 def create_document_record(
@@ -67,6 +74,8 @@ def update_document_status(
     chunk_count: int | None = None,
     error_message: str | None = None,
 ) -> dict | None:
+    if not is_valid_uuid(document_id):
+        return None
     with get_db_connection() as connection:
         with connection.transaction():
             with connection.cursor() as cursor:
@@ -103,6 +112,8 @@ def update_document_status(
 
 
 def get_document_by_id(document_id: str) -> dict | None:
+    if not is_valid_uuid(document_id):
+        return None
     with get_db_connection() as connection:
         with connection.cursor() as cursor:
             cursor.execute(
@@ -155,6 +166,8 @@ def list_documents_for_cleanup(limit: int = 100) -> list[dict]:
 
 
 def delete_document_record(document_id: str) -> dict | None:
+    if not is_valid_uuid(document_id):
+        return None
     with get_db_connection() as connection:
         with connection.transaction():
             with connection.cursor() as cursor:
