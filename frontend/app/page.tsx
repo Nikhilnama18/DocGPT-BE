@@ -1,7 +1,5 @@
+import { DocGptHome } from "@/components/home/docgpt-home";
+
 export default function Home() {
-  return (
-    <div>
-      <h1>Welcome to DocGPT!</h1>
-    </div>
-  );
+  return <DocGptHome />;
 }
