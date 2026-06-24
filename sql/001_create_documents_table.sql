@@ -21,7 +21,7 @@ BEGIN
 END $$;
 
 CREATE TABLE IF NOT EXISTS documents (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY NOT NULL,
     original_file_name TEXT NOT NULL,
     storage_url TEXT NOT NULL,
     status document_status NOT NULL DEFAULT 'UPLOADED',
